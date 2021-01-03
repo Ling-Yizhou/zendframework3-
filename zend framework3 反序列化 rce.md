@@ -19,18 +19,19 @@ class IndexController extends AbstractActionController
 # 漏洞分析
 
 ## __destruct
+![](https://raw.githubusercontent.com/Ling-Yizhou/zendframework3-/main/1.png)
 在zendframework3核心包中只有三个`__destruct`入口，其中两个都很简单，只有`vendor/zendframework/zend-http/src/Response/Stream.php`中的`Zend\Http\Response\Stream`类有利用的可能。其析构函数如下
-
+![](https://raw.githubusercontent.com/Ling-Yizhou/zendframework3-/main/2.png)
 
 `$this->cleanup`和`$this->streamName`，`unlink`函数的第一个参数为`String`类型，所以可以在啊`$this->streamName`传入类的实例，可以触发`__toString`。
 
 ## __toString
 有`__toString`方法的类很多，我看中了`vendor/zendframework/zend-view/src/Helper/Gravatar.php`中的`Zend\View\Helper\Gravatar`
-
+![](https://raw.githubusercontent.com/Ling-Yizhou/zendframework3-/main/3.png)
 
 
 跟进到`$this->htmlAttribs()`
-
+![](https://raw.githubusercontent.com/Ling-Yizhou/zendframework3-/main/4.png)
 
 ```php
 $key = $escaper($key);
@@ -49,7 +50,7 @@ $escaper        = $this->getView()->plugin('escapehtml');
 $escapeHtmlAttr = $this->getView()->plugin('escapehtmlattr');
 ```
 这两句带来了一些麻烦。`$this->getView()`可控
-```
+```php
 public function getView()
 {
     return $this->view;
@@ -59,24 +60,24 @@ public function getView()
 
 ## 疏通
 `vendor/zendframework/zend-view/src/Renderer/PhpRenderer.php`中的`Zend\View\Renderer\PhpRenderer`就是我们要找的。
-
+![](https://raw.githubusercontent.com/Ling-Yizhou/zendframework3-/main/5.png)
 
 由于`$this->__helpers`可控，所以`$this->getHelperPluginManager()`也可控，
 接下来有两种方法，最终目的都是让`get()`返回我们要的字符串
-### Zend\ServiceManager\ReaderPluginManager
+### 方法一：Zend\ServiceManager\ReaderPluginManager
 `get()`方法在`vendor/zendframework/zend-servicemanager/src/AbstractPluginManager.php`的`Zend\ServiceManager\AbstractPluginManager`中定义，这里我随便选取了子类`Zend\Config\ReaderPluginManager`
 
 
-
+![](https://raw.githubusercontent.com/Ling-Yizhou/zendframework3-/main/6.png)
 `$name`参数为不可控的`escapehtml`和`escapehtmlattr`。
 
-
+![](https://raw.githubusercontent.com/Ling-Yizhou/zendframework3-/main/7.png)
 `has()`可以控制输出使`$found`为`true`
 
-
+![](https://raw.githubusercontent.com/Ling-Yizhou/zendframework3-/main/8.png)
 `parent::get()`同样可控
 
-
+![](https://raw.githubusercontent.com/Ling-Yizhou/zendframework3-/main/9.png)
 `$this->validate()`主要是个`instanceof`的判断，这就限制死了`$key = $escaper($key)`中的`$escaper`必须是个类，又回到了寻找`__invoke()`。
 
 #### __invoke
@@ -89,7 +90,7 @@ public function __invoke($value)
 ```
 我找到了一个可以利用的子类`Zend\Validator\Callback`
 
-
+![](https://raw.githubusercontent.com/Ling-Yizhou/zendframework3-/main/10.png)
 可以看到第139行有`call_user_func_array`，`$callback`来自
 ```php
 public function getCallback()
@@ -98,10 +99,11 @@ public function getCallback()
 }
 ```
 而`args`来自`$args = [$value];`，也就是函数的第一个参数，即`htmlAttribs()`中的`$key`，所有参数可控，可以rce，最终调用栈如下
-
+![](https://raw.githubusercontent.com/Ling-Yizhou/zendframework3-/main/11.png)
 
 #### poc
 要注意zend framework3采用了自动加载类的方式，会自动包含我们需要的类
+![](https://raw.githubusercontent.com/Ling-Yizhou/zendframework3-/main/12.png)
 ```php
 <?php
 
@@ -168,14 +170,15 @@ namespace {
 ```
 
 #### 结果
+![](https://raw.githubusercontent.com/Ling-Yizhou/zendframework3-/main/13.png)
 
-
-### Zend\Config\Config
+### 方法二：Zend\Config\Config
 另一种方法是寻找更方便的有`get()`的方法，我找到了`Zend\Config\Config`
-
+![](https://raw.githubusercontent.com/Ling-Yizhou/zendframework3-/main/14.png)
 
 可以直接返回我们想要的数据，在`$key = $escaper($key)`rce
 调用栈如下
+![](https://raw.githubusercontent.com/Ling-Yizhou/zendframework3-/main/16.png)
 
 #### poc
 ```php
@@ -235,3 +238,4 @@ namespace {
 ```
 
 #### 结果
+![](https://raw.githubusercontent.com/Ling-Yizhou/zendframework3-/main/15.png)
